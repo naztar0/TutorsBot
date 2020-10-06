@@ -32,6 +32,19 @@ class Chat(StatesGroup):
     send = State()
 
 
+class NewOrder(StatesGroup):
+    subject = State()
+    level = State()
+    q_type = State()  # short / multiple choice
+    m_choice = State()
+    s_answers = State()
+    timed = State()
+    duration = State()
+    timezone_city = State()
+    additions = State()
+    accepting = State()
+
+
 async def start_menu(message: types.Message):
     key = types.ReplyKeyboardMarkup(resize_keyboard=True)
     key.add(Buttons.introduction_client)
@@ -71,6 +84,14 @@ async def _send_message(func, **kwargs):
     except utils.exceptions.ChatNotFound: return
     except utils.exceptions.BadRequest: return 0
     return True
+
+
+async def _back_client(message, state):
+    if message.text == Buttons.back:
+        await state.finish()
+        await client_main(message)
+        return True
+    return
 
 
 def create_new_code():
@@ -113,6 +134,11 @@ def _media_group_builder(data, caption=True):
     return media
 
 
+def get_price(data):
+    price = 0
+    return price
+
+
 @dp.message_handler(commands=['start'])
 async def message_handler(message: types.Message):
     key = types.ReplyKeyboardMarkup(resize_keyboard=True)
@@ -141,7 +167,7 @@ async def client_main(message):
     key.add(Buttons.lad_chat_client, Buttons.my_chats_client)
     key.add(Buttons.support, Buttons.new_order)
     await message.answer("First of all, relax, because we have your back(Smiley)!\n\n"
-                         "If you already have your order ID, click on “Ladchat”.\n\n"
+                         "If you already have your order ID, click on “LadChat”.\n\n"
                          "If you want to create a new order, click on “New Order”.\n\n"
                          "Didn't receive an order ID? No worries! Contact our support team and we’ll sort things out.",
                          reply_markup=key)
@@ -207,6 +233,15 @@ async def chat_answer(callback_query, state):
     await callback_query.message.answer("Now all messages will be send to this interlocutor", reply_markup=key)
 
 
+async def new_order_start(message):
+    key = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    key.add(Buttons.subjects[0], Buttons.subjects[1], Buttons.subjects[2], Buttons.subjects[3], Buttons.subjects[4])
+    key.add(Buttons.back)
+    await message.answer("Please select the subject you need help with:\n"
+                         "Math, Stats, Finance, Business, Chem\n\nThanks!", reply_markup=key)
+    await NewOrder.subject.set()
+
+
 @dp.message_handler(content_types=['text'])
 async def message_handler(message: types.Message, state: FSMContext):
     if message.text == Buttons.back:
@@ -224,6 +259,9 @@ async def message_handler(message: types.Message, state: FSMContext):
         await my_chats(message, 'client', state)
     elif message.text == Buttons.my_chats_tutor:
         await my_chats(message, 'tutor', state)
+
+    elif message.text == Buttons.new_order:
+        await new_order_start(message)
 
 
 
@@ -449,6 +487,192 @@ async def message_handler(message: types.Message, state: FSMContext):
     except FileNotFoundError:
         await message.answer("There are no media files")
     await client_main(message)
+
+
+# New order zone
+@dp.message_handler(content_types=['text'], state=NewOrder.subject)
+async def message_handler(message: types.Message, state: FSMContext):
+    if _back_client(message, state):
+        return
+    if message.text not in Buttons.subjects:
+        return
+    key = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    key.add(Buttons.level[0], Buttons.level[1], Buttons.level[2])
+    key.add(Buttons.back)
+    await state.update_data({'subject': message.text})
+    await NewOrder.level.set()
+    await message.answer("Next, we need to know difficulty level of your assignment. "
+                         "If you consider your course to be more or less difficult than "
+                         "what our level suggestions are select feel free to select level "
+                         "you think best fits your course. However, its crucial that you select "
+                         "appropriate difficulty level:\nLevel 1: High School\nLevel 2: Undergraduate "
+                         "(University Year 1-2) AND IB AP courses.\nLevel 3 Undergraduate (Year 3-4)",
+                         reply_markup=key)
+
+
+@dp.message_handler(content_types=['text'], state=NewOrder.level)
+async def message_handler(message: types.Message, state: FSMContext):
+    if _back_client(message, state):
+        return
+    if message.text not in Buttons.level:
+        return
+    key = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    key.add(Buttons.q_type[0])
+    key.add(Buttons.q_type[1])
+    key.add(Buttons.q_type[2])
+    key.add(Buttons.back)
+    await state.update_data({'level': message.text})
+    await NewOrder.q_type.set()
+    await message.answer("Next, please tell us what type of questions your assignment has? Please note that we can "
+                         "only help with short answers and multiple choice questions.", reply_markup=key)
+
+
+@dp.message_handler(content_types=['text'], state=NewOrder.q_type)
+async def message_handler(message: types.Message, state: FSMContext):
+    if _back_client(message, state):
+        return
+    if message.text not in Buttons.q_type:
+        return
+    await state.update_data({'q_type': message.text})
+    if message.text == Buttons.q_type[0]:
+        await NewOrder.s_answers.set()
+        answer = "Ok, how many short answer question does your assignment have? (select 0 if none)"
+    else:
+        await NewOrder.m_choice.set()
+        answer = "How many multiple choice questions does your assignment have? (select 0 if none)"
+    key = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    key.add(Buttons.back)
+    await message.answer(answer)
+
+
+@dp.message_handler(content_types=['text'], state=NewOrder.m_choice)
+async def message_handler(message: types.Message, state: FSMContext):
+    if _back_client(message, state):
+        return
+    if not str(message.text).isdigit():
+        return
+    data = await state.get_data()
+    await state.update_data({'m_choice': int(message.text)})
+    if data.get('q_type') == Buttons.q_type[2]:
+        await NewOrder.s_answers.set()
+        await message.answer("Ok, how many short answer question does your assignment have? (select 0 if none)")
+    else:
+        if int(message.text) == 0:
+            await state.finish()
+            await message.answer("So, your assignment doesn't have any questions?")
+            return
+        else:
+            key = types.ReplyKeyboardMarkup(resize_keyboard=True)
+            key.add(Buttons.timed[0], Buttons.timed[1])
+            key.add(Buttons.back)
+            await NewOrder.timed.set()
+            await message.answer("Ok, we are almost done!\n\nIs your assignment timed?", reply_markup=key)
+
+
+@dp.message_handler(content_types=['text'], state=NewOrder.s_answers)
+async def message_handler(message: types.Message, state: FSMContext):
+    if _back_client(message, state):
+        return
+    if not str(message.text).isdigit():
+        return
+    data = await state.get_data()
+    if data.get('q_type') == Buttons.q_type[2]:
+        if int(message.text) == 0 and data.get('m_choice') == 0:
+            await state.finish()
+            await message.answer("So, your assignment doesn't have any questions?")
+            return
+    key = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    key.add(Buttons.timed[0], Buttons.timed[1])
+    key.add(Buttons.back)
+    await state.update_data({'s_answers': int(message.text)})
+    await NewOrder.timed.set()
+    await message.answer("Ok, we are almost done!\n\nIs your assignment timed?", reply_markup=key)
+
+
+@dp.message_handler(content_types=['text'], state=NewOrder.timed)
+async def message_handler(message: types.Message, state: FSMContext):
+    if _back_client(message, state):
+        return
+    if message.text not in Buttons.timed:
+        return
+    if message.text == Buttons.timed[0]:
+        await NewOrder.duration.set()
+        await message.answer("How long will you have to complete it?")
+    else:
+        await NewOrder.timezone_city.set()
+        await message.answer("When is your assignment due?\nPlease indicate your time zone OR "
+                             "city in your answer. For example NYC DD/MM/YY and 8:30 PM")
+
+
+@dp.message_handler(content_types=['text'], state=NewOrder.duration)
+async def message_handler(message: types.Message, state: FSMContext):
+    if _back_client(message, state):
+        return
+    if len(message.text) > 50:
+        await message.answer("Too long message, please try again")
+        return
+    await state.update_data({'duration': message.text})
+    await NewOrder.timezone_city.set()
+    await message.answer("When is your assignment due?\nPlease indicate your time zone OR "
+                         "city in your answer. For example NYC DD/MM/YY and 8:30 PM")
+
+
+@dp.message_handler(content_types=['text'], state=NewOrder.timezone_city)
+async def message_handler(message: types.Message, state: FSMContext):
+    if _back_client(message, state):
+        return
+    if len(message.text) > 50:
+        await message.answer("Too long message, please try again")
+        return
+    key = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    key.add(Buttons.done)
+    key.add(Buttons.back)
+    await state.update_data({'timezone_city': message.text})
+    await NewOrder.additions.set()
+    await message.answer("Finally, is there anything else our tutor should know about your assignment? "
+                         "If you have past exams, course outline, sample questions upload them here. "
+                         "The more you attach the easier it will be for us to find a tutor that can help you. "
+                         "When you are done press DONE.", reply_markup=key)
+
+
+@dp.message_handler(content_types=['text', 'photo', 'document'], state=NewOrder.additions)
+async def message_handler(message: types.Message, state: FSMContext):
+    if _back_client(message, state):
+        return
+    if len(message.text) > 500:
+        await message.answer("Too long message, please try again")
+        return
+    data = await state.get_data()
+    if message.text == Buttons.done:
+        price = get_price(data)
+        key = types.ReplyKeyboardMarkup(resize_keyboard=True)
+        key.add(Buttons.accept)
+        key.add(Buttons.support)
+        key.add(Buttons.back)
+        await NewOrder.accepting.set()
+        await message.answer("Our price for your order is <PRICE>. If you like it just click accept! "
+                             "You won't have to pay until one of our tutors accepts your order.", reply_markup=key)
+        return
+    elif message.text:
+        if len(str(data.get('add_text'))) + len(message.text) > 500:
+            await message.answer("The text that has already been sent is too long")
+            return
+        await state.update_data({'add_text': message.text})
+    elif message.photo:
+        if message.caption:
+            if len(str(data.get('add_text'))) + len(message.caption) > 500:
+                await message.answer("The text that has already been sent is too long")
+            else:
+                await state.update_data({'add_text': message.caption})
+        await state.update_data({'add_photo': message.photo[-1].file_id})
+    elif message.document:
+        await state.update_data({'add_document': message.document.file_id})
+
+
+
+
+
+
 
 
 

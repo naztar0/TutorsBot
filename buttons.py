@@ -9,3 +9,9 @@ class Buttons:
     my_chats_client = '💬My chats💬'
     my_chats_tutor = '💬 My chats 💬'
 
+    subjects = 'Math', 'Stats', 'Finance', 'Business', 'Chem'
+    level = 'Level 1', 'Level 2', 'Level 3'
+    q_type = 'Short answers', 'Multiple choice questions', 'Both types'
+    timed = 'Yes', 'No'
+    done = 'DONE'
+    accept = 'ACCEPT'
