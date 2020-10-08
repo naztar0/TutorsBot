@@ -33,6 +33,7 @@ class Chat(StatesGroup):
 
 
 class NewOrder(StatesGroup):
+    contact = State()
     subject = State()
     level = State()
     q_type = State()  # short / multiple choice
@@ -134,9 +135,55 @@ def _media_group_builder(data, caption=True):
     return media
 
 
-def get_price(data):
-    price = 0
-    return price
+def get_price(data) -> float:
+    with open('prices.json', 'r') as f:
+        prices = json.load(f)
+
+    price: float = 0
+    level: str = data['level']
+    m_choice: int = data.get('m_choice', 0)
+    s_answers: int = data.get('s_answers', 0)
+    duration_inc: int = prices['duration_inc'] if data.get('duration') is not None else 0
+    questions = m_choice + s_answers
+    if questions > 300:
+        discount = 0.75
+    elif questions > 250:
+        discount = 0.71
+    elif questions > 200:
+        discount = 0.7
+    elif questions > 150:
+        discount = 0.6
+    elif questions > 100:
+        discount = 0.5
+    elif questions > 50:
+        discount = 0.4
+    elif questions > 40:
+        discount = 0.35
+    elif questions > 30:
+        discount = 0.25
+    elif questions > 20:
+        discount = 0.2
+    elif questions > 10:
+        discount = 0.1
+    else:
+        discount = 0
+
+    if level == Buttons.level[0]:
+        level_multiplier = prices['level_multiplier_1']
+    elif level == Buttons.level[1]:
+        level_multiplier = prices['level_multiplier_2']
+    elif level == Buttons.level[2]:
+        level_multiplier = prices['level_multiplier_3']
+    else:
+        level_multiplier = prices['level_multiplier_4']
+
+    price += m_choice * prices['m_choice']
+    price += s_answers * prices['s_answers']
+    price *= level_multiplier
+    price -= price * discount
+    price += duration_inc
+
+    return price.__round__(2)
 
 
 @dp.message_handler(commands=['start'])
@@ -235,17 +282,15 @@ async def chat_answer(callback_query, state):
 
 async def new_order_start(message):
     key = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    key.add(Buttons.subjects[0], Buttons.subjects[1], Buttons.subjects[2], Buttons.subjects[3], Buttons.subjects[4])
-    key.add(Buttons.back)
-    await message.answer("Please select the subject you need help with:\n"
-                         "Math, Stats, Finance, Business, Chem\n\nThanks!", reply_markup=key)
-    await NewOrder.subject.set()
+    key.add(types.KeyboardButton("Share contact", request_contact=True))
+    await NewOrder.contact.set()
+    await message.answer("Please share your contact", reply_markup=key)
 
 
 @dp.message_handler(content_types=['text'])
 async def message_handler(message: types.Message, state: FSMContext):
     if message.text == Buttons.back:
-        # TEMPORARY
+        #TEMPORARY
         await client_main(message)
     elif message.text == Buttons.introduction_tutor:
         await tutor_main(message)
@@ -490,9 +535,26 @@ async def message_handler(message: types.Message, state: FSMContext):
 
 
 # New order zone
+@dp.message_handler(content_types=['contact'], state=NewOrder.contact)
+async def message_handler(message: types.Message, state: FSMContext):
+    country_code = str(message.contact.phone_number)[:-9]
+    if country_code[0] == '+': country_code = country_code[1:]
+    if country_code in c.forbidden_country_codes:
+        await state.finish()
+        await message.answer("Sorry, your country is not supported")
+        await client_main(message)
+        return
+    key = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    key.add(Buttons.subjects[0], Buttons.subjects[1], Buttons.subjects[2], Buttons.subjects[3], Buttons.subjects[4])
+    key.add(Buttons.back)
+    await NewOrder.subject.set()
+    await message.answer("Please select the subject you need help with:\n"
+                         "Math, Stats, Finance, Business, Chem\n\nThanks!", reply_markup=key)
+
+
 @dp.message_handler(content_types=['text'], state=NewOrder.subject)
 async def message_handler(message: types.Message, state: FSMContext):
-    if _back_client(message, state):
+    if await _back_client(message, state):
         return
     if message.text not in Buttons.subjects:
         return
@@ -505,14 +567,14 @@ async def message_handler(message: types.Message, state: FSMContext):
                          "If you consider your course to be more or less difficult than "
                          "what our level suggestions are select feel free to select level "
                          "you think best fits your course. However, its crucial that you select "
-                         "appropriate difficulty level:\nLevel 1: High School\nLevel 2: Undergraduate "
+                         "appropriate difficulty level:\n\nLevel 1: High School\nLevel 2: Undergraduate "
                          "(University Year 1-2) AND IB AP courses.\nLevel 3 Undergraduate (Year 3-4)",
                          reply_markup=key)
 
 
 @dp.message_handler(content_types=['text'], state=NewOrder.level)
 async def message_handler(message: types.Message, state: FSMContext):
-    if _back_client(message, state):
+    if await _back_client(message, state):
         return
     if message.text not in Buttons.level:
         return
@@ -529,7 +591,7 @@ async def message_handler(message: types.Message, state: FSMContext):
 
 @dp.message_handler(content_types=['text'], state=NewOrder.q_type)
 async def message_handler(message: types.Message, state: FSMContext):
-    if _back_client(message, state):
+    if await _back_client(message, state):
         return
     if message.text not in Buttons.q_type:
         return
@@ -542,12 +604,12 @@ async def message_handler(message: types.Message, state: FSMContext):
         answer = "How many multiple choice questions does your assignment have? (select 0 if none)"
     key = types.ReplyKeyboardMarkup(resize_keyboard=True)
     key.add(Buttons.back)
-    await message.answer(answer)
+    await message.answer(answer, reply_markup=key)
 
 
 @dp.message_handler(content_types=['text'], state=NewOrder.m_choice)
 async def message_handler(message: types.Message, state: FSMContext):
-    if _back_client(message, state):
+    if await _back_client(message, state):
         return
     if not str(message.text).isdigit():
         return
@@ -571,7 +633,7 @@ async def message_handler(message: types.Message, state: FSMContext):
 
 @dp.message_handler(content_types=['text'], state=NewOrder.s_answers)
 async def message_handler(message: types.Message, state: FSMContext):
-    if _back_client(message, state):
+    if await _back_client(message, state):
         return
     if not str(message.text).isdigit():
         return
@@ -591,35 +653,39 @@ async def message_handler(message: types.Message, state: FSMContext):
 
 @dp.message_handler(content_types=['text'], state=NewOrder.timed)
 async def message_handler(message: types.Message, state: FSMContext):
-    if _back_client(message, state):
+    if await _back_client(message, state):
         return
     if message.text not in Buttons.timed:
         return
+    key = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    key.add(Buttons.back)
     if message.text == Buttons.timed[0]:
         await NewOrder.duration.set()
-        await message.answer("How long will you have to complete it?")
+        await message.answer("How long will you have to complete it?", reply_markup=key)
     else:
         await NewOrder.timezone_city.set()
         await message.answer("When is your assignment due?\nPlease indicate your time zone OR "
-                             "city in your answer. For example NYC DD/MM/YY and 8:30 PM")
+                             "city in your answer. For example NYC DD/MM/YY and 8:30 PM", reply_markup=key)
 
 
 @dp.message_handler(content_types=['text'], state=NewOrder.duration)
 async def message_handler(message: types.Message, state: FSMContext):
-    if _back_client(message, state):
+    if await _back_client(message, state):
         return
     if len(message.text) > 50:
         await message.answer("Too long message, please try again")
         return
+    key = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    key.add(Buttons.back)
     await state.update_data({'duration': message.text})
     await NewOrder.timezone_city.set()
     await message.answer("When is your assignment due?\nPlease indicate your time zone OR "
-                         "city in your answer. For example NYC DD/MM/YY and 8:30 PM")
+                         "city in your answer. For example NYC DD/MM/YY and 8:30 PM", reply_markup=key)
 
 
 @dp.message_handler(content_types=['text'], state=NewOrder.timezone_city)
 async def message_handler(message: types.Message, state: FSMContext):
-    if _back_client(message, state):
+    if await _back_client(message, state):
         return
     if len(message.text) > 50:
         await message.answer("Too long message, please try again")
@@ -637,10 +703,7 @@ async def message_handler(message: types.Message, state: FSMContext):
 
 @dp.message_handler(content_types=['text', 'photo', 'document'], state=NewOrder.additions)
 async def message_handler(message: types.Message, state: FSMContext):
-    if _back_client(message, state):
-        return
-    if len(message.text) > 500:
-        await message.answer("Too long message, please try again")
+    if await _back_client(message, state):
         return
     data = await state.get_data()
     if message.text == Buttons.done:
@@ -649,11 +712,15 @@ async def message_handler(message: types.Message, state: FSMContext):
         key.add(Buttons.accept)
         key.add(Buttons.support)
         key.add(Buttons.back)
+        await state.update_data({'price': price})
         await NewOrder.accepting.set()
-        await message.answer("Our price for your order is <PRICE>. If you like it just click accept! "
+        await message.answer(f"Our price for your order is {price}. If you like it just click accept! "
                              "You won't have to pay until one of our tutors accepts your order.", reply_markup=key)
         return
     elif message.text:
+        if len(message.text) > 500:
+            await message.answer("Too long message, please try again")
+            return
         if len(str(data.get('add_text'))) + len(message.text) > 500:
             await message.answer("The text that has already been sent is too long")
             return
@@ -668,6 +735,50 @@ async def message_handler(message: types.Message, state: FSMContext):
     elif message.document:
         await state.update_data({'add_document': message.document.file_id})
 
+
+@dp.message_handler(content_types=['text'], state=NewOrder.accepting)
+async def message_handler(message: types.Message, state: FSMContext):
+    if await _back_client(message, state):
+        return
+    await message.answer("Accepted!")
+    data = await state.get_data()
+    await state.finish()
+    await client_main(message)
+
+    text = data.get('add_text')
+    photo = data.get('add_photo')
+    document = data.get('add_document')
+    media_links = ''
+
+    if text:
+        text_m = await bot.send_message(c.media_chat, text)
+        media_links += f'[text](https://t.me/{c.media_chat[1:]}/{text_m.message_id}) '
+    if photo:
+        photo_m = await bot.send_photo(c.media_chat, photo)
+        media_links += f'[photo](https://t.me/{c.media_chat[1:]}/{photo_m.message_id}) '
+    if document:
+        document_m = await bot.send_document(c.media_chat, document)
+        media_links += f'[document](https://t.me/{c.media_chat[1:]}/{document_m.message_id}) '
+
+    with open('prices.json', 'r') as f:
+        prices = json.load(f)
+
+    price_tutor = (data['price'] * prices['tutor_share']).__round__(2)
+    due_date = data['timezone_city'].replace('_', '\\_').replace('*', '\\*').replace('`', '\\`').replace('[', '\\[')
+    timed = data.get('duration', 'NO').replace('_', '\\_').replace('*', '\\*').replace('`', '\\`').replace('[', '\\[')
+    text_to_channel = f"*{data['subject']}*\n" \
+                      f"*{data['level']}*\n" \
+                      f"*DUE DATE:* {due_date}\n" \
+                      f"*TIMED:* {timed}\n" \
+                      f"*SHORT ANSWER:* {data.get('s_answer', '0')}\n" \
+                      f"*MULTIPLE CHOICE:* {data.get('m_choice', '0')}\n" \
+                      f"*ADDITIONAL INFO WITH FILES:* {media_links}\n" \
+                      f"*PRICE:* {price_tutor}"
+
+    key = types.InlineKeyboardMarkup()
+    key.add(types.InlineKeyboardButton("Take", callback_data=f"{message.chat.id}_{data['price']}"))
+
+    await bot.send_message(c.tutors_chat, text_to_channel, parse_mode='Markdown', reply_markup=key, disable_web_page_preview=True)
 
 
 
