@@ -2,5 +2,7 @@ venv
 export
 constants.py
 chats.json
+temp_chats.json
+chats.txt
 a.py
 t.txt

@@ -3,6 +3,7 @@ import constants as c
 from buttons import Buttons
 from media_group import media_group
 import expited_chats_checker
+import expited_temp_chats_checker
 
 import json
 import time
@@ -22,7 +23,10 @@ storage = MemoryStorage()
 dp = Dispatcher(bot, storage=storage)
 
 
+class Activate(StatesGroup): code = State()
 class Export(StatesGroup): code = State()
+class Delete(StatesGroup): code = State()
+class Settings(StatesGroup): option = State()
 class New_chat_tutor(StatesGroup): code = State()
 class New_chat_client(StatesGroup): code = State()
 
@@ -44,13 +48,6 @@ class NewOrder(StatesGroup):
     timezone_city = State()
     additions = State()
     accepting = State()
-
-
-async def start_menu(message: types.Message):
-    key = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    key.add(Buttons.introduction_client)
-    key.add(Buttons.introduction_tutor)
-    await message.answer("Hey there 👋!\nAre you a student or a tutor?\nPlease press one of the buttons below!", reply_markup=key)
 
 
 @dp.message_handler(commands=['start'], state=Chat)
@@ -75,6 +72,20 @@ async def message_handler(message: types.Message, state: FSMContext):
 async def message_handler(message: types.Message, state: FSMContext):
     await state.finish()
     await start_menu(message)
+
+
+def client_keyboard() -> types.ReplyKeyboardMarkup:
+    key = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    key.add(Buttons.lad_chat_client, Buttons.my_chats_client)
+    key.add(Buttons.support, Buttons.new_order)
+    return key
+
+
+async def start_menu(message: types.Message):
+    key = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    key.add(Buttons.introduction_client)
+    key.add(Buttons.introduction_tutor)
+    await message.answer("Hey there 👋!\nAre you a student or a tutor?\nPlease press one of the buttons below!", reply_markup=key)
 
 
 async def _send_message(func, **kwargs):
@@ -194,14 +205,6 @@ async def message_handler(message: types.Message):
     await message.answer("Hey there 👋!\nAre you a student or a tutor?\nPlease press one of the buttons below!", reply_markup=key)
 
 
-@dp.message_handler(commands=['export'])
-async def message_handler(message: types.Message):
-    key = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    key.add(Buttons.back)
-    await Export.code.set()
-    await message.answer("Send me the chat ID to export", reply_markup=key)
-
-
 async def tutor_main(message):
     key = types.ReplyKeyboardMarkup(resize_keyboard=True)
     key.add(Buttons.lad_chat_tutor, Buttons.my_chats_tutor)
@@ -287,6 +290,82 @@ async def new_order_start(message):
     await message.answer("Please share your contact", reply_markup=key)
 
 
+async def moderator_menu(message):
+    text = "/activate_chat - activate secret chat\n" \
+           "/export_chat - export secret chat history\n" \
+           "/delete_chat - delete secret chat\n" \
+           "/all_chats - view all existing chats"
+    await message.answer(text)
+
+
+async def admin_menu(message):
+    text = "/activate_chat - activate secret chat\n" \
+           "/export_chat - export secret chat history\n" \
+           "/delete_chat - delete secret chat\n" \
+           "/all_chats - view all existing chats\n" \
+           "/price_settings - price settings"
+    await message.answer(text)
+
+
+@dp.message_handler(commands=['activate_chat'])
+async def message_handler(message: types.Message):
+    if message.chat.id != c.moderator_chat or message.chat.id != c.admin_id:
+        return
+    key = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    key.add(Buttons.back)
+    await Activate.code.set()
+    await message.answer("Send me the chat ID to activate", reply_markup=key)
+
+
+@dp.message_handler(commands=['export_chat'])
+async def message_handler(message: types.Message):
+    if message.chat.id != c.moderator_chat or message.chat.id != c.admin_id:
+        return
+    key = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    key.add(Buttons.back)
+    await Export.code.set()
+    await message.answer("Send me the chat ID to export", reply_markup=key)
+
+
+@dp.message_handler(commands=['delete_chat'])
+async def message_handler(message: types.Message):
+    if message.chat.id != c.moderator_chat or message.chat.id != c.admin_id:
+        return
+    key = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    key.add(Buttons.back)
+    await Delete.code.set()
+    await message.answer("Send me the chat ID to delete", reply_markup=key)
+
+
+@dp.message_handler(commands=['all_chats'])
+async def message_handler(message: types.Message):
+    if message.chat.id != c.moderator_chat or message.chat.id != c.admin_id:
+        return
+    with open('chats.json', 'r') as f:
+        chats = json.load(f)
+    buffer = ''
+    for chat in chats:
+        buffer += chat + datetime.datetime.strftime(datetime.datetime.fromtimestamp(chats[chat]['created']), "\t- %d.%m / %H:%M\n")
+    with open('chats.txt', 'w') as f:
+        f.write(buffer)
+    await bot.send_document(message.chat.id, types.InputFile('chats.txt'), 'chats.txt')
+
+
+@dp.message_handler(commands=['price_settings'])
+async def message_handler(message: types.Message):
+    if message.chat.id != c.admin_id:
+        return
+    with open('prices.json', 'r') as f:
+        prices = json.load(f)
+    buffer = ''
+    for option in prices:
+        buffer += f'`{option}` - {prices[option]}\n'
+    key = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    key.add(Buttons.back)
+    await Settings.option.set()
+    await message.answer(buffer + "Send me the option which you want to change with the new value separated by space")
+
+
 @dp.message_handler(content_types=['text'])
 async def message_handler(message: types.Message, state: FSMContext):
     if message.text == Buttons.back:
@@ -308,12 +387,12 @@ async def message_handler(message: types.Message, state: FSMContext):
     elif message.text == Buttons.new_order:
         await new_order_start(message)
 
-
-
-@dp.callback_query_handler(lambda callback_query: True)
-async def callback_inline(callback_query: types.CallbackQuery, state: FSMContext):
-    if callback_query.data[:6] == 'answer':
-        await chat_answer(callback_query, state)
+    elif message.text == c.moderator_key:
+        if message.chat.id == c.moderator_chat:
+            await moderator_menu(message)
+    elif message.text == c.admin_key:
+        if message.chat.id == c.admin_id:
+            await admin_menu(message)
 
 
 @dp.message_handler(content_types=['text'], state=New_chat_client.code)
@@ -388,20 +467,20 @@ async def message_handler(message: types.Message, state: FSMContext):
             await tutor_main(message)
 
 
-@dp.callback_query_handler(lambda callback_query: True, state=Chat.code)
-async def callback_inline(callback_query: types.CallbackQuery, state: FSMContext):
-    code = callback_query.data
-    with open('chats.json', 'r') as f:
-        chats = json.load(f)
-    if not chats.get(code):
-        await state.finish()
-        await callback_query.answer("ID does not exist!", show_alert=True)
-        await client_main(callback_query.message)
-        return
-    await state.update_data({'code': code})
-    await Chat.send.set()
-    await callback_query.answer()
-    await callback_query.message.answer("Now all messages will be send to this interlocutor")
+# @dp.callback_query_handler(lambda callback_query: True, state=Chat.code)
+# async def callback_inline(callback_query: types.CallbackQuery, state: FSMContext):
+#    code = callback_query.data
+#     with open('chats.json', 'r') as f:
+#         chats = json.load(f)
+#     if not chats.get(code):
+#         await state.finish()
+#         await callback_query.answer("ID does not exist!", show_alert=True)
+#         await client_main(callback_query.message)
+#         return
+#     await state.update_data({'code': code})
+#     await Chat.send.set()
+#     await callback_query.answer()
+#     await callback_query.message.answer("Now all messages will be send to this interlocutor")
 
 
 @dp.message_handler(content_types=['text', 'photo', 'video', 'document'], state=Chat.send)
@@ -496,18 +575,44 @@ async def message_handler(message: types.Message, state: FSMContext):
         await message.answer("The message wasn't delivered, the user may have blocked the bot")
 
 
+@dp.message_handler(content_types=['text'], state=Activate.code)
+async def message_handler(message: types.Message, state: FSMContext):
+    await state.finish()
+    if message.text == Buttons.back:
+        await message.answer("Canceled", reply_markup=client_keyboard())
+        return
+    code = message.text
+    with open('temp_chats.json', 'r') as f:
+        temp_chats = json.load(f)
+    chat = temp_chats.get(code)
+    if not chat:
+        await message.answer("Chat ID does not exist or already activated!", reply_markup=client_keyboard())
+        return
+
+    del temp_chats[code]
+    with open('temp_chats.json', 'w', encoding='utf-8') as f:
+        json.dump(temp_chats, f, indent=2)
+
+    with open('chats.json', 'r') as f:
+        chats = json.load(f)
+    chats[code] = chat
+    with open('chats.json', 'w', encoding='utf-8') as f:
+        json.dump(chats, f, indent=2)
+
+    await message.answer("Activated", reply_markup=client_keyboard())
+
+
 @dp.message_handler(content_types=['text'], state=Export.code)
 async def message_handler(message: types.Message, state: FSMContext):
     await state.finish()
     if message.text == Buttons.back:
-        await client_main(message)
+        await message.answer("Canceled", reply_markup=client_keyboard())
         return
     code = message.text
     with open('chats.json', 'r') as f:
         chats = json.load(f)
     if not chats.get(code):
-        await message.answer("ID does not exist!")
-        await client_main(message)
+        await message.answer("Chat ID does not exist!", reply_markup=client_keyboard())
         return
     try:
         await bot.send_document(message.chat.id, types.InputFile(f'export/text/{code}.txt', f'{code} text messages.txt'))
@@ -531,7 +636,47 @@ async def message_handler(message: types.Message, state: FSMContext):
             await sleep(.05)
     except FileNotFoundError:
         await message.answer("There are no media files")
-    await client_main(message)
+    await message.answer("Sending finished", reply_markup=client_keyboard())
+
+
+@dp.message_handler(content_types=['text'], state=Delete.code)
+async def message_handler(message: types.Message, state: FSMContext):
+    await state.finish()
+    if message.text == Buttons.back:
+
+        await message.answer("Canceled", reply_markup=client_keyboard())
+        return
+    code = message.text
+    with open('chats.json', 'r') as f:
+        chats = json.load(f)
+    if not chats.get(code):
+        await message.answer("Chat ID does not exist!", reply_markup=client_keyboard())
+        return
+    del chats[code]
+    with open('chats.json', 'w', encoding='utf-8') as f:
+        json.dump(chats, f, indent=2)
+    await message.answer("Chat deleted", reply_markup=client_keyboard())
+
+
+@dp.message_handler(content_types=['text'], state=Settings.option)
+async def message_handler(message: types.Message, state: FSMContext):
+    if message.text == Buttons.back:
+        await state.finish()
+        await message.answer("Canceled", reply_markup=client_keyboard())
+        return
+    text: str = message.text[1:].split(' ')
+    if len(text) != 2:
+        await message.answer("Invalid input, please try again", reply_markup=client_keyboard())
+        return
+    await state.finish()
+    option = text[0]
+    value = text[1]
+    with open('prices.json', 'r') as f:
+        prices = json.load(f)
+    prices[option] = value
+    with open('prices.json', 'w') as f:
+        json.dump(prices, f)
+    await message.answer("Successfully changed", reply_markup=client_keyboard())
 
 
 # New order zone
@@ -776,12 +921,42 @@ async def message_handler(message: types.Message, state: FSMContext):
                       f"*PRICE:* {price_tutor}"
 
     key = types.InlineKeyboardMarkup()
-    key.add(types.InlineKeyboardButton("Take", callback_data=f"{message.chat.id}_{data['price']}"))
+    key.add(types.InlineKeyboardButton("Take", callback_data=f"new{message.chat.id}_{data['price']}"))
 
     await bot.send_message(c.tutors_chat, text_to_channel, parse_mode='Markdown', reply_markup=key, disable_web_page_preview=True)
 
 
+@dp.callback_query_handler(lambda callback_query: True)
+async def callback_inline(callback_query: types.CallbackQuery, state: FSMContext):
+    if callback_query.data[:6] == 'answer':
+        await chat_answer(callback_query, state)
+    elif callback_query.data[:3] == 'new':
+        await callback_query.message.edit_reply_markup()
+        text = callback_query.data[3:].split('_')
+        client = int(text[0])
+        price = text[1]
+        code = create_new_code()
+        with open('temp_chats.json', 'r') as f:
+            chats = json.load(f)
+        chats[code] = {
+            'created': int(time.time()),
+            'client': client,
+            'tutor': callback_query.from_user.id
+        }
+        with open('temp_chats.json', 'w', encoding='utf-8') as f:
+            json.dump(chats, f, indent=2)
 
+        key = types.InlineKeyboardMarkup()
+        key.add(types.InlineKeyboardButton("Pay", url=c.paypal))
+        await _send_message(bot.send_message, chat_id=client,
+                            text=f"Hey! One of our tutors accepted your order. Your chat ID is: `{code}`\n"
+                                 f"Please deposit *{price}* to the following PayPal account.\n"
+                                 "Your chat ID is active but will be deactivated in 30 min if the payment is not made."
+                                 "Thanks!", reply_markup=key)
+        await _send_message(bot.send_message, chat_id=callback_query.from_user.id,
+                            text=f"Hey! Your chat ID is: `{code}`\n"
+                                 "The client has 30 min to make a deposit. You will be notified.")
+        await callback_query.answer("See your private messages with the bot", show_alert=True)
 
 
 
@@ -790,4 +965,5 @@ async def message_handler(message: types.Message, state: FSMContext):
 
 if __name__ == '__main__':
     dp.loop.create_task(expited_chats_checker.check())
+    dp.loop.create_task(expited_temp_chats_checker.check())
     executor.start_polling(dp, skip_updates=True)
