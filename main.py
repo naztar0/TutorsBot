@@ -8,7 +8,6 @@ import expited_temp_chats_checker
 import json
 import time
 import datetime
-import string
 import random
 from asyncio import sleep
 
@@ -76,8 +75,8 @@ async def message_handler(message: types.Message, state: FSMContext):
 
 def client_keyboard() -> types.ReplyKeyboardMarkup:
     key = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    key.add(Buttons.lad_chat_client, Buttons.my_chats_client)
-    key.add(Buttons.support, Buttons.new_order)
+    key.add(Buttons.my_chats_client, Buttons.new_order)
+    key.add(Buttons.support)
     return key
 
 
@@ -107,9 +106,10 @@ async def _back_client(message, state):
 
 
 def create_new_code():
+    color = random.choice(c.random_colors)
     word = random.choice(c.random_words)
-    code = ''.join(random.choices(string.ascii_letters + string.digits, k=4))
-    return f'{word}-{code}'
+    suffix = random.randint(0, 99)
+    return f'{color}{word}{suffix}'
 
 
 def save_data(path, name: str = None, text: str = None, data_type: str = None, data: str = None):
@@ -207,15 +207,15 @@ async def message_handler(message: types.Message):
 
 async def tutor_main(message):
     key = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    key.add(Buttons.lad_chat_tutor, Buttons.my_chats_tutor)
+    key.add(Buttons.my_chats_tutor)
     key.add(Buttons.support)
     await message.answer("Choose action", reply_markup=key)
 
 
 async def client_main(message):
     key = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    key.add(Buttons.lad_chat_client, Buttons.my_chats_client)
-    key.add(Buttons.support, Buttons.new_order)
+    key.add(Buttons.my_chats_client, Buttons.new_order)
+    key.add(Buttons.support)
     await message.answer("First of all, relax, because we have your back(Smiley)!\n\n"
                          "If you already have your order ID, click on “LadChat”.\n\n"
                          "If you want to create a new order, click on “New Order”.\n\n"
@@ -231,14 +231,6 @@ async def lad_chat_client(message):
         "Ready for some chit-chat? Simply enter your order ID and you will be connected to the 🕴️anonymous🕴️ chat with your tutor!\n\n"
         "Don't have order ID? 😳 Don't worry just create a new order!\n\n"
         "Didn't receive your order ID? 😬\nContact our support team so we can sort things out.", reply_markup=key)
-    # TEMPORARY FUNCTION
-    code = create_new_code()
-    with open('chats.json', 'r') as f:
-        chats = json.load(f)
-    chats[code] = {'created': int(time.time())}
-    with open('chats.json', 'wt') as f:
-        json.dump(chats, f, indent=2)
-    await message.answer(f"*New chat code, just for test*:\n`{code}`", parse_mode='Markdown')
 
 
 async def lad_chat_tutor(message):
@@ -290,6 +282,51 @@ async def new_order_start(message):
     await message.answer("Please share your contact", reply_markup=key)
 
 
+async def generate_new_chat(callback_query):
+    await callback_query.message.edit_reply_markup()
+    text = callback_query.data[3:].split('_')
+    client = int(text[0])
+    price = float(text[1])
+    code = create_new_code()
+    with open('temp_chats.json', 'r') as f:
+        temp_chats = json.load(f)
+    with open('chats.json', 'r') as f:
+        chats = json.load(f)
+    temp_chats[code] = {
+        'created': int(time.time()),
+        'client': client,
+        'tutor': callback_query.from_user.id
+    }
+    chats[code] = temp_chats[code]
+    with open('temp_chats.json', 'w', encoding='utf-8') as f:
+        json.dump(temp_chats, f, indent=2)
+    with open('chats.json', 'w', encoding='utf-8') as f:
+        json.dump(chats, f, indent=2)
+
+    with open('prices.json', 'r') as f:
+        prices = json.load(f)
+    price_tutor = (price * prices['tutor_share']).__round__(2)
+
+    key = types.InlineKeyboardMarkup()
+    key.add(types.InlineKeyboardButton("Pay", url=c.paypal))
+    await _send_message(bot.send_message, chat_id=client,
+                        text=f"Hey! One of our tutors accepted your order. Your chat ID is: `{code}`\n"
+                             f"Please deposit *{price}* to the following PayPal account.\n"
+                             "Your chat ID is active but will be deactivated in 30 min if the payment is not made."
+                             "Thanks!\n\nTo access your chat click on 'my chats' and then your order ID.",
+                        reply_markup=key, parse_mode='Markdown')
+    await _send_message(bot.send_message, chat_id=callback_query.from_user.id,
+                        text=f"Hey! Your chat ID is: `{code}`\nThe client has 30 min to make a deposit. "
+                             f"You will be notified.", parse_mode='Markdown')
+    await callback_query.answer("See your private messages with the bot", show_alert=True)
+
+    await bot.send_message(c.moderator_chat, f"*New order!*\n*Chat ID:* `{code}`\n"
+                                             f"*Price:* {price}\n*Tutor share:* {price_tutor}\n"
+                                             f"[Client](tg://user?id={client}) "
+                                             f"[Tutor](tg://user?id={callback_query.from_user.id})",
+                           parse_mode='Markdown')
+
+
 async def moderator_menu(message):
     text = "/activate_chat - activate secret chat\n" \
            "/export_chat - export secret chat history\n" \
@@ -309,7 +346,7 @@ async def admin_menu(message):
 
 @dp.message_handler(commands=['activate_chat'])
 async def message_handler(message: types.Message):
-    if message.chat.id != c.moderator_chat or message.chat.id != c.admin_id:
+    if message.chat.id not in (c.moderator_chat, c.admin_id):
         return
     key = types.ReplyKeyboardMarkup(resize_keyboard=True)
     key.add(Buttons.back)
@@ -319,7 +356,7 @@ async def message_handler(message: types.Message):
 
 @dp.message_handler(commands=['export_chat'])
 async def message_handler(message: types.Message):
-    if message.chat.id != c.moderator_chat or message.chat.id != c.admin_id:
+    if message.chat.id not in (c.moderator_chat, c.admin_id):
         return
     key = types.ReplyKeyboardMarkup(resize_keyboard=True)
     key.add(Buttons.back)
@@ -329,7 +366,7 @@ async def message_handler(message: types.Message):
 
 @dp.message_handler(commands=['delete_chat'])
 async def message_handler(message: types.Message):
-    if message.chat.id != c.moderator_chat or message.chat.id != c.admin_id:
+    if message.chat.id not in (c.moderator_chat, c.admin_id):
         return
     key = types.ReplyKeyboardMarkup(resize_keyboard=True)
     key.add(Buttons.back)
@@ -339,7 +376,7 @@ async def message_handler(message: types.Message):
 
 @dp.message_handler(commands=['all_chats'])
 async def message_handler(message: types.Message):
-    if message.chat.id != c.moderator_chat or message.chat.id != c.admin_id:
+    if message.chat.id not in (c.moderator_chat, c.admin_id):
         return
     with open('chats.json', 'r') as f:
         chats = json.load(f)
@@ -363,7 +400,8 @@ async def message_handler(message: types.Message):
     key = types.ReplyKeyboardMarkup(resize_keyboard=True)
     key.add(Buttons.back)
     await Settings.option.set()
-    await message.answer(buffer + "Send me the option which you want to change with the new value separated by space")
+    await message.answer(buffer + "Send me the option which you want to change with the new value separated by space",
+                         parse_mode='Markdown', reply_markup=key)
 
 
 @dp.message_handler(content_types=['text'])
@@ -375,10 +413,6 @@ async def message_handler(message: types.Message, state: FSMContext):
         await tutor_main(message)
     elif message.text == Buttons.introduction_client:
         await client_main(message)
-    elif message.text == Buttons.lad_chat_client:
-        await lad_chat_client(message)
-    elif message.text == Buttons.lad_chat_tutor:
-        await lad_chat_tutor(message)
     elif message.text == Buttons.my_chats_client:
         await my_chats(message, 'client', state)
     elif message.text == Buttons.my_chats_tutor:
@@ -467,20 +501,20 @@ async def message_handler(message: types.Message, state: FSMContext):
             await tutor_main(message)
 
 
-# @dp.callback_query_handler(lambda callback_query: True, state=Chat.code)
-# async def callback_inline(callback_query: types.CallbackQuery, state: FSMContext):
-#    code = callback_query.data
-#     with open('chats.json', 'r') as f:
-#         chats = json.load(f)
-#     if not chats.get(code):
-#         await state.finish()
-#         await callback_query.answer("ID does not exist!", show_alert=True)
-#         await client_main(callback_query.message)
-#         return
-#     await state.update_data({'code': code})
-#     await Chat.send.set()
-#     await callback_query.answer()
-#     await callback_query.message.answer("Now all messages will be send to this interlocutor")
+@dp.callback_query_handler(lambda callback_query: True, state=Chat.code)
+async def callback_inline(callback_query: types.CallbackQuery, state: FSMContext):
+    code = callback_query.data
+    with open('chats.json', 'r') as f:
+        chats = json.load(f)
+    if not chats.get(code):
+        await state.finish()
+        await callback_query.answer("ID does not exist!", show_alert=True)
+        await client_main(callback_query.message)
+        return
+    await state.update_data({'code': code})
+    await Chat.send.set()
+    await callback_query.answer()
+    await callback_query.message.answer("Now all messages will be send to this interlocutor")
 
 
 @dp.message_handler(content_types=['text', 'photo', 'video', 'document'], state=Chat.send)
@@ -581,23 +615,16 @@ async def message_handler(message: types.Message, state: FSMContext):
     if message.text == Buttons.back:
         await message.answer("Canceled", reply_markup=client_keyboard())
         return
-    code = message.text
+    code: str = message.text.lower()
     with open('temp_chats.json', 'r') as f:
         temp_chats = json.load(f)
     chat = temp_chats.get(code)
     if not chat:
         await message.answer("Chat ID does not exist or already activated!", reply_markup=client_keyboard())
         return
-
     del temp_chats[code]
     with open('temp_chats.json', 'w', encoding='utf-8') as f:
         json.dump(temp_chats, f, indent=2)
-
-    with open('chats.json', 'r') as f:
-        chats = json.load(f)
-    chats[code] = chat
-    with open('chats.json', 'w', encoding='utf-8') as f:
-        json.dump(chats, f, indent=2)
 
     await message.answer("Activated", reply_markup=client_keyboard())
 
@@ -608,7 +635,7 @@ async def message_handler(message: types.Message, state: FSMContext):
     if message.text == Buttons.back:
         await message.answer("Canceled", reply_markup=client_keyboard())
         return
-    code = message.text
+    code: str = message.text.lower()
     with open('chats.json', 'r') as f:
         chats = json.load(f)
     if not chats.get(code):
@@ -646,7 +673,7 @@ async def message_handler(message: types.Message, state: FSMContext):
 
         await message.answer("Canceled", reply_markup=client_keyboard())
         return
-    code = message.text
+    code: str = message.text.lower()
     with open('chats.json', 'r') as f:
         chats = json.load(f)
     if not chats.get(code):
@@ -664,18 +691,21 @@ async def message_handler(message: types.Message, state: FSMContext):
         await state.finish()
         await message.answer("Canceled", reply_markup=client_keyboard())
         return
-    text: str = message.text[1:].split(' ')
+    text = message.text.split(' ')
     if len(text) != 2:
         await message.answer("Invalid input, please try again", reply_markup=client_keyboard())
         return
-    await state.finish()
     option = text[0]
     value = text[1]
+    if not value.isdigit():
+        await message.answer("Value is not digit, please try again", reply_markup=client_keyboard())
+        return
+    await state.finish()
     with open('prices.json', 'r') as f:
         prices = json.load(f)
-    prices[option] = value
-    with open('prices.json', 'w') as f:
-        json.dump(prices, f)
+    prices[option] = float(value)
+    with open('prices.json', 'w', encoding='utf-8') as f:
+        json.dump(prices, f, indent=2)
     await message.answer("Successfully changed", reply_markup=client_keyboard())
 
 
@@ -915,7 +945,7 @@ async def message_handler(message: types.Message, state: FSMContext):
                       f"*{data['level']}*\n" \
                       f"*DUE DATE:* {due_date}\n" \
                       f"*TIMED:* {timed}\n" \
-                      f"*SHORT ANSWER:* {data.get('s_answer', '0')}\n" \
+                      f"*SHORT ANSWER:* {data.get('s_answers', '0')}\n" \
                       f"*MULTIPLE CHOICE:* {data.get('m_choice', '0')}\n" \
                       f"*ADDITIONAL INFO WITH FILES:* {media_links}\n" \
                       f"*PRICE:* {price_tutor}"
@@ -931,33 +961,14 @@ async def callback_inline(callback_query: types.CallbackQuery, state: FSMContext
     if callback_query.data[:6] == 'answer':
         await chat_answer(callback_query, state)
     elif callback_query.data[:3] == 'new':
-        await callback_query.message.edit_reply_markup()
-        text = callback_query.data[3:].split('_')
-        client = int(text[0])
-        price = text[1]
-        code = create_new_code()
-        with open('temp_chats.json', 'r') as f:
-            chats = json.load(f)
-        chats[code] = {
-            'created': int(time.time()),
-            'client': client,
-            'tutor': callback_query.from_user.id
-        }
-        with open('temp_chats.json', 'w', encoding='utf-8') as f:
-            json.dump(chats, f, indent=2)
+        await generate_new_chat(callback_query)
 
-        key = types.InlineKeyboardMarkup()
-        key.add(types.InlineKeyboardButton("Pay", url=c.paypal))
-        await _send_message(bot.send_message, chat_id=client,
-                            text=f"Hey! One of our tutors accepted your order. Your chat ID is: `{code}`\n"
-                                 f"Please deposit *{price}* to the following PayPal account.\n"
-                                 "Your chat ID is active but will be deactivated in 30 min if the payment is not made."
-                                 "Thanks!", reply_markup=key)
-        await _send_message(bot.send_message, chat_id=callback_query.from_user.id,
-                            text=f"Hey! Your chat ID is: `{code}`\n"
-                                 "The client has 30 min to make a deposit. You will be notified.")
-        await callback_query.answer("See your private messages with the bot", show_alert=True)
 
+@dp.callback_query_handler(lambda callback_query: True, state=Chat)
+async def callback_inline(callback_query: types.CallbackQuery, state: FSMContext):
+    if callback_query.data[:3] == 'new':
+        await state.finish()
+        await generate_new_chat(callback_query)
 
 
 
