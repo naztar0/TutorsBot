@@ -896,7 +896,7 @@ async def message_handler(message: types.Message, state: FSMContext):
             return
         if len(str(data.get('add_text'))) + len(message.text) > 500:
             await message.answer("The text that has already been sent is too long")
-            return
+            returngit
         await state.update_data({'add_text': message.text})
     elif message.photo:
         if message.caption:
