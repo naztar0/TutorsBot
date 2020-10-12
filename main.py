@@ -10,11 +10,21 @@ import time
 import datetime
 import random
 from asyncio import sleep
+import os
 
 from aiogram import Bot, Dispatcher, executor, types, utils
 from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
+
+
+WEBHOOK = True
+WEBHOOK_HOST = c.app
+WEBHOOK_PATH = '/webhook/'
+WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
+
+WEBAPP_HOST = '0.0.0.0'
+WEBAPP_PORT = os.environ.get('PORT')
 
 
 bot = Bot(c.token)
@@ -971,10 +981,20 @@ async def callback_inline(callback_query: types.CallbackQuery, state: FSMContext
         await generate_new_chat(callback_query)
 
 
+async def on_startup(dpc):
+    await bot.set_webhook(WEBHOOK_URL)
 
+
+async def on_shutdown(dpc):
+    # insert code here to run it before shutdown
+    pass
 
 
 if __name__ == '__main__':
     dp.loop.create_task(expited_chats_checker.check())
     dp.loop.create_task(expited_temp_chats_checker.check())
-    executor.start_polling(dp, skip_updates=True)
+    if WEBHOOK:
+        executor.start_webhook(dispatcher=dp, webhook_path=WEBHOOK_PATH,
+                               on_startup=on_startup, on_shutdown=on_shutdown, host=WEBAPP_HOST, port=WEBAPP_PORT)
+    else:
+        executor.start_polling(dp, skip_updates=True)
