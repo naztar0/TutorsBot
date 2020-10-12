@@ -16,7 +16,8 @@ async def check():
         if expired:
             for chat in expired:
                 del temp_chats[chat]
-                del chats[chat]
+                if chats.get(chat):
+                    del chats[chat]
             with open('temp_chats.json', 'w', encoding='utf-8') as f:
                 json.dump(temp_chats, f, indent=2)
             with open('chats.json', 'w', encoding='utf-8') as f:

@@ -1,8 +1,13 @@
 venv
 export
+.idea
 constants.py
 chats.json
 temp_chats.json
 chats.txt
 a.py
 t.txt
+instruction.gif
+__init__.py
+Procfile.windows
+requirements.txt
