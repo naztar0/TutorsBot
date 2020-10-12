@@ -13,3 +13,8 @@ class Buttons:
     timed = 'Yes', 'No'
     done = 'DONE'
     accept = 'ACCEPT'
+
+    m_activate = 'Activate'
+    m_delete = 'Delete'
+    m_export = 'Export'
+    m_show = 'Show all'
