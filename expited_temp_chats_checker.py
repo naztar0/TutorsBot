@@ -11,7 +11,7 @@ async def check():
             chats = json.load(f)
         expired = []
         for chat in temp_chats:
-            if temp_chats[chat]['created'] < time.time() - 1800:  # 30 minutes
+            if temp_chats[chat]['created'] < time.time() - 21600:  # 6 hours
                 expired.append(chat)
         if expired:
             for chat in expired:

@@ -19,7 +19,7 @@ from aiogram.contrib.fsm_storage.memory import MemoryStorage
 
 
 WEBHOOK = True
-WEBHOOK_HOST = c.app
+WEBHOOK_HOST = c.app  # heroku app url
 WEBHOOK_PATH = '/webhook/'
 WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
 
@@ -85,7 +85,10 @@ async def message_handler(message: types.Message, state: FSMContext):
 
 @dp.message_handler(commands=['start'])
 async def message_handler(message: types.Message):
-    await start_menu(message)
+    if message.chat.id == c.moderator_chat:
+        await message.answer("Moderator mode", reply_markup=moderator_keyboard())
+    else:
+        await start_menu(message)
 
 
 def client_keyboard() -> types.ReplyKeyboardMarkup:
@@ -401,11 +404,16 @@ async def message_handler(message: types.Message):
                          parse_mode='Markdown', reply_markup=key)
 
 
+async def support_send(message):
+    await _send_message(bot.send_message, chat_id=c.moderator_chat,
+                        text=f"❗ Request for help ❗\n[User](tg://user?id={message.chat.id})", parse_mode='Markdown')
+    await message.answer("Thanks for reaching out!\nOne of our support team members will get in touch with you as soon as possible.")
+
+
 @dp.message_handler(content_types=['text'])
 async def message_handler(message: types.Message, state: FSMContext):
     if message.text == Buttons.back:
-        #TEMPORARY
-        await client_main(message)
+        await start_menu(message)
     elif message.text == Buttons.introduction_tutor:
         await tutor_main(message)
     elif message.text == Buttons.introduction_client:
@@ -416,6 +424,8 @@ async def message_handler(message: types.Message, state: FSMContext):
         await my_chats(message, 'tutor', state)
     elif message.text == Buttons.new_order:
         await new_order_start(message)
+    elif message.text == Buttons.support:
+        await support_send(message)
 
     elif message.text == Buttons.m_activate:
         if message.chat.id == c.moderator_chat:
@@ -525,13 +535,15 @@ async def message_handler(message: types.Message, state: FSMContext):
         return
     option = text[0]
     value = text[1]
-    if not value.isdigit():
+    try:
+        value = float(value)
+    except ValueError:
         await message.answer("Value is not digit, please try again", reply_markup=client_keyboard())
         return
     await state.finish()
     with open('prices.json', 'r') as f:
         prices = json.load(f)
-    prices[option] = float(value)
+    prices[option] = value
     with open('prices.json', 'w', encoding='utf-8') as f:
         json.dump(prices, f, indent=2)
     await message.answer("Successfully changed", reply_markup=client_keyboard())
