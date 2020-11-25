@@ -4,9 +4,9 @@ from buttons import Buttons
 from media_group import media_group
 import expited_chats_checker
 import expited_temp_chats_checker
+from database_connection import DatabaseConnection
 
 import json
-import time
 import datetime
 import random
 from asyncio import sleep
@@ -36,8 +36,6 @@ class Activate(StatesGroup): code = State()
 class Export(StatesGroup): code = State()
 class Delete(StatesGroup): code = State()
 class Settings(StatesGroup): option = State()
-class New_chat_tutor(StatesGroup): code = State()
-class New_chat_client(StatesGroup): code = State()
 
 
 class Chat(StatesGroup):
@@ -60,18 +58,6 @@ class NewOrder(StatesGroup):
 
 
 @dp.message_handler(commands=['start'], state=Chat)
-async def message_handler(message: types.Message, state: FSMContext):
-    await state.finish()
-    await start_menu(message)
-
-
-@dp.message_handler(commands=['start'], state=New_chat_tutor)
-async def message_handler(message: types.Message, state: FSMContext):
-    await state.finish()
-    await start_menu(message)
-
-
-@dp.message_handler(commands=['start'], state=New_chat_client)
 async def message_handler(message: types.Message, state: FSMContext):
     await state.finish()
     await start_menu(message)
@@ -139,14 +125,19 @@ def create_new_code():
     return f'{color}{word}{suffix}'
 
 
-def save_data(path, name: str = None, text: str = None, data_type: str = None, data: str = None):
+def save_data(chat: int, name: str, text: str = None, data_type: str = None, data: str = None):
+    insertTextQuery = "INSERT INTO text_messages (chat, user, text) VALUES (%s, %s, %s)"
+    insertMediaQuery = "INSERT INTO media_messages (chat, type, file_id) VALUES (%s, %s, %s)"
     if text:
-        with open(f'export/text/{path}.txt', 'a', encoding='utf-8') as f:
-            f.write(f'{datetime.datetime.strftime(datetime.datetime.now(), "%d.%m / %H:%M")} - '
-                    f'{name}:\n{text}\n\n')
+        with DatabaseConnection() as db:
+            conn, cursor = db
+            cursor.executemany(insertTextQuery, [(chat, name, text)])
+            conn.commit()
     if data:
-        with open(f'export/media/{path}.txt', 'a', encoding='utf-8') as f:
-            f.write(f'{data_type}/{data}\n')
+        with DatabaseConnection() as db:
+            conn, cursor = db
+            cursor.executemany(insertMediaQuery, [(chat, data_type, data)])
+            conn.commit()
 
 
 def _media_group_builder(data, caption=True):
@@ -239,41 +230,22 @@ async def client_main(message):
                          reply_markup=client_keyboard())
 
 
-async def lad_chat_client(message):
-    key = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    key.add(Buttons.back)
-    await New_chat_client.code.set()
-    await message.answer(
-        "Ready for some chit-chat? Simply enter your order ID and you will be connected to the 🕴️anonymous🕴️ chat with your tutor!\n\n"
-        "Don't have order ID? 😳 Don't worry just create a new order!\n\n"
-        "Didn't receive your order ID? 😬\nContact our support team so we can sort things out.", reply_markup=key)
-
-
-async def lad_chat_tutor(message):
-    key = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    key.add(Buttons.back)
-    await New_chat_tutor.code.set()
-    await message.answer(
-        "Please enter your order ID to enter the chat. Do not disclose or ask for any personal information.\n"
-        "If you have questions regarding payment or clients conduct please message our support team.\n"
-        "Chat will be monitored by our quality assurance specialist.", reply_markup=key)
-
-
 async def my_chats(message, who_am_i, state):
-    key = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    key.add(Buttons.back)
-    with open('chats.json', 'r') as f:
-        chats = json.load(f)
-    inline_key = types.InlineKeyboardMarkup()
-    exists = False
-    iam = message.chat.id
-    for code in chats:
-        if chats[code].get(who_am_i) == iam:
-            inline_key.add(types.InlineKeyboardButton(code, callback_data=code))
-            exists = True
-    if not exists:
+    selectQuery = "SELECT ID, code FROM chats WHERE {}=(%s)"
+    with DatabaseConnection() as db:
+        conn, cursor = db
+        cursor.execute(selectQuery.format(who_am_i), [message.chat.id])
+        chats = cursor.fetchall()
+    if not chats:
         await message.answer("You haven't any chats")
         return
+
+    key = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    key.add(Buttons.back)
+    inline_key = types.InlineKeyboardMarkup()
+    for code in chats:
+        inline_key.add(types.InlineKeyboardButton(code[1], callback_data=code[0]))
+
     await Chat.code.set()
     await state.update_data({'who_am_i': who_am_i})
     await message.answer("There are all your chats", reply_markup=inline_key)
@@ -282,11 +254,11 @@ async def my_chats(message, who_am_i, state):
 
 async def chat_answer(callback_query, state):
     who_am_i = 'tutor' if callback_query.data[6:7] == 'c' else 'client'
-    code = callback_query.data[7:]
+    chat_id = callback_query.data[7:]
     key = types.ReplyKeyboardMarkup(resize_keyboard=True)
     key.add(Buttons.back)
     await Chat.send.set()
-    await state.update_data({'code': code, 'who_am_i': who_am_i})
+    await state.update_data({'chat_id': chat_id, 'who_am_i': who_am_i})
     await callback_query.answer()
     await callback_query.message.answer("Now all messages will be send to this interlocutor", reply_markup=key)
 
@@ -306,20 +278,12 @@ async def generate_new_chat(callback_query):
     client = int(text[0])
     price = float(text[1])
     code = create_new_code()
-    with open('temp_chats.json', 'r') as f:
-        temp_chats = json.load(f)
-    with open('chats.json', 'r') as f:
-        chats = json.load(f)
-    temp_chats[code] = {
-        'created': int(time.time()),
-        'client': client,
-        'tutor': callback_query.from_user.id
-    }
-    chats[code] = temp_chats[code]
-    with open('temp_chats.json', 'w', encoding='utf-8') as f:
-        json.dump(temp_chats, f, indent=2)
-    with open('chats.json', 'w', encoding='utf-8') as f:
-        json.dump(chats, f, indent=2)
+
+    insetQuery = "INSERT INTO chats (code, client, tutor) VALUES (%s, %s, %s)"
+    with DatabaseConnection() as db:
+        conn, cursor = db
+        cursor.executemany(insetQuery, [(code, client, callback_query.from_user.id)])
+        conn.commit()
 
     with open('prices.json', 'r') as f:
         prices = json.load(f)
@@ -378,11 +342,16 @@ async def delete_chat_init(message: types.Message):
 async def show_all_chats_init(message: types.Message):
     if message.chat.id not in (c.moderator_chat, c.admin_id):
         return
-    with open('chats.json', 'r') as f:
-        chats = json.load(f)
+
+    selectQuery = "SELECT code, created FROM chats"
+    with DatabaseConnection() as db:
+        conn, cursor = db
+        cursor.execute(selectQuery)
+        chats = cursor.fetchall()
+
     buffer = ''
     for chat in chats:
-        buffer += chat + datetime.datetime.strftime(datetime.datetime.fromtimestamp(chats[chat]['created']), "\t- %d.%m / %H:%M\n")
+        buffer += chat[0] + datetime.datetime.strftime(chat[1], "\t- %d.%m / %H:%M\n")
     with open('chats.txt', 'w') as f:
         f.write(buffer)
     await bot.send_document(message.chat.id, types.InputFile('chats.txt'), 'chats.txt')
@@ -448,20 +417,30 @@ async def message_handler(message: types.Message, state: FSMContext):
         await message.answer("Canceled", reply_markup=moderator_keyboard())
         return
     code: str = message.text.lower()
-    with open('temp_chats.json', 'r') as f:
-        temp_chats = json.load(f)
-    chat = temp_chats.get(code)
-    if not chat:
-        await message.answer("Chat ID does not exist or already activated!", reply_markup=moderator_keyboard())
-        return
-    del temp_chats[code]
-    with open('temp_chats.json', 'w', encoding='utf-8') as f:
-        json.dump(temp_chats, f, indent=2)
 
-    with open('chats.json', 'r') as f:
-        chats = json.load(f)
-    client = chats[code]['client']
-    tutor = chats[code]['tutor']
+    active = None
+    selectQuery = "SELECT active, client, tutor FROM chats WHERE code=(%s)"
+    updateQuery = "UPDATE chats SET active=1 WHERE code=(%s)"
+    with DatabaseConnection() as db:
+        conn, cursor = db
+        cursor.execute(selectQuery, [code])
+        chat = cursor.fetchone()
+        if chat:
+            if chat[0] == 1:
+                active = True
+            else:
+                active = False
+                cursor.execute(updateQuery, [code])
+                conn.commit()
+
+    if active is None:
+        await message.answer("Chat ID does not exist!", reply_markup=moderator_keyboard())
+        return
+    elif active:
+        await message.answer("Chat ID is already activated!", reply_markup=moderator_keyboard())
+        return
+
+    client, tutor = chat[1], chat[2]
     await _send_message(bot.send_message, chat_id=client, text="We have received the payment, the chat is now fully active!")
     await _send_message(bot.send_message, chat_id=tutor, text="We have received the payment, the chat is now fully active!")
     await message.answer("Activated", reply_markup=moderator_keyboard())
@@ -474,33 +453,37 @@ async def message_handler(message: types.Message, state: FSMContext):
         await message.answer("Canceled", reply_markup=moderator_keyboard())
         return
     code: str = message.text.lower()
-    with open('chats.json', 'r') as f:
-        chats = json.load(f)
-    if not chats.get(code):
-        await message.answer("Chat ID does not exist!", reply_markup=moderator_keyboard())
+    
+    selectChatQuery = "SELECT ID FROM chats WHERE code=(%s)"
+    selectQuery = "SELECT type, file_id FROM media_messages WHERE chat=(%s)"
+    data = None
+    with DatabaseConnection() as db:
+        conn, cursor = db
+        cursor.execute(selectChatQuery, [code])
+        chat_id = cursor.fetchone()
+        if chat_id:
+            cursor.execute(selectQuery, [chat_id[0]])
+            data = cursor.fetchall()
+    if not chat_id:
+        await message.answer("Chat does not exist!")
         return
-    try:
-        await bot.send_document(message.chat.id, types.InputFile(f'export/text/{code}.txt', f'{code} text messages.txt'))
-    except FileNotFoundError:
-        await message.answer("There are no text messages")
-    await sleep(.05)
-    try:
-        with open(f'export/media/{code}.txt', 'r') as f:
-            data = f.readlines()
-        for file in data:
-            filetype, fileid = file[:-1].split('/')
-            try:
-                if filetype == 'photo':
-                    await bot.send_photo(message.chat.id, fileid)
-                elif filetype == 'video':
-                    await bot.send_video(message.chat.id, fileid)
-                elif filetype == 'document':
-                    await bot.send_document(message.chat.id, fileid)
-            except Exception as e:
-                await message.answer(str(e))
-            await sleep(.05)
-    except FileNotFoundError:
-        await message.answer("There are no media files")
+    if not data:
+        await message.answer("There are no media messages")
+        return
+
+    for d in data:
+        filetype, fileid = d[0], d[1]
+        try:
+            if filetype == c.PHOTO:
+                await bot.send_photo(message.chat.id, fileid)
+            elif filetype == c.VIDEO:
+                await bot.send_video(message.chat.id, fileid)
+            elif filetype == c.DOCUMENT:
+                await bot.send_document(message.chat.id, fileid)
+        except Exception as e:
+            await message.answer(str(e))
+        await sleep(.05)
+
     await message.answer("Sending finished", reply_markup=moderator_keyboard())
 
 
@@ -508,18 +491,14 @@ async def message_handler(message: types.Message, state: FSMContext):
 async def message_handler(message: types.Message, state: FSMContext):
     await state.finish()
     if message.text == Buttons.back:
-
         await message.answer("Canceled", reply_markup=moderator_keyboard())
         return
     code: str = message.text.lower()
-    with open('chats.json', 'r') as f:
-        chats = json.load(f)
-    if not chats.get(code):
-        await message.answer("Chat ID does not exist!", reply_markup=moderator_keyboard())
-        return
-    del chats[code]
-    with open('chats.json', 'w', encoding='utf-8') as f:
-        json.dump(chats, f, indent=2)
+    deleteQuery = "DELETE FROM chats WHERE code=(%s)"
+    with DatabaseConnection() as db:
+        conn, cursor = db
+        cursor.execute(deleteQuery, [code])
+        conn.commit()
     await message.answer("Chat deleted", reply_markup=moderator_keyboard())
 
 
@@ -549,67 +528,6 @@ async def message_handler(message: types.Message, state: FSMContext):
     await message.answer("Successfully changed", reply_markup=client_keyboard())
 
 
-@dp.message_handler(content_types=['text'], state=New_chat_client.code)
-async def message_handler(message: types.Message, state: FSMContext):
-    if message.text == Buttons.back:
-        await state.finish()
-        await client_main(message)
-        return
-    code = message.text
-    with open('chats.json', 'r') as f:
-        chats = json.load(f)
-    chat = chats.get(code)
-    if chat is None:
-        await message.answer("Wrong order ID")
-        return
-    if chat.get('client'):
-        await message.answer("There is another client in this chat")
-        return
-    chats[code]['client'] = message.chat.id
-    with open('chats.json', 'w') as f:
-        json.dump(chats, f, indent=2)
-    await state.finish()
-    await state.update_data({'code': code, 'who_am_i': 'client'})
-    await Chat.send.set()
-    await message.answer("You are successfully connected to the chat!\n*Now all messages will be send to this interlocutor*\n\n"
-                         "_Please wait until you receive a message stating that the tutor is connected to the chat, and only after that write him a message_",
-                         parse_mode='Markdown')
-
-
-@dp.message_handler(content_types=['text'], state=New_chat_tutor.code)
-async def message_handler(message: types.Message, state: FSMContext):
-    if message.text == Buttons.back:
-        await state.finish()
-        await tutor_main(message)
-        return
-    code = message.text
-    with open('chats.json', 'r') as f:
-        chats = json.load(f)
-    chat = chats.get(code)
-    if chat is None:
-        await message.answer("Wrong chat ID")
-        return
-    if chat.get('client') is None:
-        await message.answer("There are no client in this chat")
-        return
-    if chat.get('tutor'):
-        await message.answer("There is another tutor in this chat")
-        return
-    chats[code]['tutor'] = message.chat.id
-    with open('chats.json', 'w') as f:
-        json.dump(chats, f, indent=2)
-    await state.finish()
-    await state.update_data({'code': code, 'who_am_i': 'tutor'})
-    await Chat.send.set()
-    await message.answer("You are successfully connected to the chat!")
-    await _send_message(bot.send_message, chat_id=chat['client'], text="Your tutor is connected! "
-                                                                       "Please use this chat to exclusively discuss your assignment. "
-                                                                       "We value your privacy, so please refrain from using any "
-                                                                       "personal information or unrelated topics. This chat may be "
-                                                                       "monitored for quality assurance. Should you have any "
-                                                                       "questions contact our support team. Thanks!")
-
-
 @dp.message_handler(content_types=['text'], state=Chat.code)
 async def message_handler(message: types.Message, state: FSMContext):
     if message.text == Buttons.back:
@@ -623,20 +541,25 @@ async def message_handler(message: types.Message, state: FSMContext):
 
 @dp.callback_query_handler(lambda callback_query: True, state=Chat.code)
 async def callback_inline(callback_query: types.CallbackQuery, state: FSMContext):
-    code = callback_query.data
-    with open('chats.json', 'r') as f:
-        chats = json.load(f)
-    if not chats.get(code):
+    chat_id = callback_query.data
+    existsQuery = "SELECT EXISTS (SELECT ID FROM chats WHERE ID=(%s))"
+    with DatabaseConnection() as db:
+        conn, cursor = db
+        cursor.execute(existsQuery, [chat_id])
+        exists = cursor.fetchone()[0]
+
+    if not exists:
         await state.finish()
         await callback_query.answer("ID does not exist!", show_alert=True)
         await client_main(callback_query.message)
         return
-    await state.update_data({'code': code})
+    await state.update_data({'chat_id': chat_id})
     await Chat.send.set()
     await callback_query.answer()
     await callback_query.message.answer("Now all messages will be send to this interlocutor")
 
 
+# SECTION: MESSAGE SEND
 @dp.message_handler(content_types=['text', 'photo', 'video', 'document'], state=Chat.send)
 async def message_handler(message: types.Message, state: FSMContext):
     data = await state.get_data()
@@ -648,11 +571,15 @@ async def message_handler(message: types.Message, state: FSMContext):
         else:
             await tutor_main(message)
         return
-    code = data.get('code')
-    with open('chats.json', 'r') as f:
-        chats = json.load(f)
-    interlocutor = chats.get(code)
-    if not interlocutor:
+    chat_id = data.get('chat_id')
+    
+    selectQuery = "SELECT client, tutor, code FROM chats WHERE ID=(%s)"
+    with DatabaseConnection() as db:
+        conn, cursor = db
+        cursor.execute(selectQuery, [chat_id])
+        chat = cursor.fetchone()
+
+    if not chat:
         await message.answer("Chat does not exist or has expired!")
         await state.finish()
         if who_am_i == 'client':
@@ -661,27 +588,21 @@ async def message_handler(message: types.Message, state: FSMContext):
             await tutor_main(message)
         return
     if who_am_i == 'client':
-        ilr = 'tutor'
+        ilr = 1
     else:
-        ilr = 'client'
-    interlocutor = interlocutor.get(ilr)
-    if not interlocutor:
-        await message.answer("No interlocutor in the chat!")
-        await state.finish()
-        if who_am_i == 'client':
-            await client_main(message)
-        else:
-            await tutor_main(message)
-        return
+        ilr = 0
+    interlocutor = chat[ilr]
+    code = chat[2]
     text = ''
     send = None
     key = None
-    name = f'@{message.chat.username}' if message.chat.username else message.chat.id
+    name = f'@{message.chat.username}' if message.chat.username else str(message.chat.id)
     state_interlocutor = await state.storage.get_data(chat=interlocutor)
-    interlocutor_in_chat = state_interlocutor.get('code')
-    if interlocutor_in_chat != code:
+    interlocutor_in_chat = state_interlocutor.get('chat_id')
+
+    if interlocutor_in_chat != chat_id:
         key = types.InlineKeyboardMarkup()
-        key.add(types.InlineKeyboardButton("Answer", callback_data=f"answer{data['who_am_i'][0]}{code}"))
+        key.add(types.InlineKeyboardButton("Answer", callback_data=f"answer{data['who_am_i'][0]}{chat_id}"))
     if message.media_group_id:
         data = await media_group(message, state)
         if data is None: return
@@ -698,29 +619,29 @@ async def message_handler(message: types.Message, state: FSMContext):
         send = await _send_message(bot.send_media_group, chat_id=interlocutor, media=media)
 
         for p in photo:
-            save_data(code, name, text, 'photo', p)
+            save_data(chat_id, name, text, c.PHOTO, p)
         for v in video:
-            save_data(code, name, text, 'video', v)
+            save_data(chat_id, name, text, c.VIDEO, v)
     elif message.text:
         text = message.text
         send = await _send_message(bot.send_message, chat_id=interlocutor, text=f'{code}:\n{text}', reply_markup=key)
-        save_data(code, name, text)
+        save_data(chat_id, name, text)
     elif message.photo:
         photo = message.photo[-1].file_id
         if message.caption:
             text = message.caption
         send = await _send_message(bot.send_photo, chat_id=interlocutor, photo=photo, caption=f'{code}:\n{text}', reply_markup=key)
-        save_data(code, name, text, 'photo', photo)
+        save_data(chat_id, name, text, c.PHOTO, photo)
     elif message.video:
         video = message.video.file_id
         if message.caption:
             text = message.caption
         send = await _send_message(bot.send_video, chat_id=interlocutor, video=video, caption=f'{code}:\n{text}', reply_markup=key)
-        save_data(code, name, text, 'video', video)
+        save_data(chat_id, name, text, c.VIDEO, video)
     elif message.document:
         file = message.document.file_id
         send = await _send_message(bot.send_document, chat_id=interlocutor, document=file, caption=f'{code}:\n{text}', reply_markup=key)
-        save_data(code, name, text, 'document', file)
+        save_data(chat_id, name, text, c.DOCUMENT, file)
     if send:
         await message.answer(f"Message sent to the chat `{code}`", parse_mode='Markdown')
     elif send == 0:

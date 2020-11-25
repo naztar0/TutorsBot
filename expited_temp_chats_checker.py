@@ -1,25 +1,13 @@
 from asyncio import sleep
-import time
-import json
+import datetime
+from database_connection import DatabaseConnection
 
 
 async def check():
+    deleteQuery = "DELETE FROM chats WHERE created<(%s) AND active=0"
     while True:
-        with open('temp_chats.json', 'r') as f:
-            temp_chats = json.load(f)
-        with open('chats.json', 'r') as f:
-            chats = json.load(f)
-        expired = []
-        for chat in temp_chats:
-            if temp_chats[chat]['created'] < time.time() - 21600:  # 6 hours
-                expired.append(chat)
-        if expired:
-            for chat in expired:
-                del temp_chats[chat]
-                if chats.get(chat):
-                    del chats[chat]
-            with open('temp_chats.json', 'w', encoding='utf-8') as f:
-                json.dump(temp_chats, f, indent=2)
-            with open('chats.json', 'w', encoding='utf-8') as f:
-                json.dump(chats, f, indent=2)
-        await sleep(60)
+        exp_date = datetime.datetime.now() - datetime.timedelta(hours=6)
+        with DatabaseConnection() as db:
+            conn, cursor = db
+            cursor.execute(deleteQuery, [exp_date])
+        await sleep(1800)
