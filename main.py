@@ -3,7 +3,6 @@ import constants as c
 from buttons import Buttons
 from media_group import media_group
 import expited_chats_checker
-import expited_temp_chats_checker
 from database_connection import DatabaseConnection
 
 import json
@@ -455,35 +454,51 @@ async def message_handler(message: types.Message, state: FSMContext):
     code: str = message.text.lower()
     
     selectChatQuery = "SELECT ID FROM chats WHERE code=(%s)"
-    selectQuery = "SELECT type, file_id FROM media_messages WHERE chat=(%s)"
-    data = None
+    selectMediaQuery = "SELECT type, file_id FROM media_messages WHERE chat=(%s)"
+    selectTextQuery = "SELECT user, time, text FROM text_messages WHERE chat=(%s)"
+    text, media = None, None
     with DatabaseConnection() as db:
         conn, cursor = db
         cursor.execute(selectChatQuery, [code])
         chat_id = cursor.fetchone()
         if chat_id:
-            cursor.execute(selectQuery, [chat_id[0]])
-            data = cursor.fetchall()
+            cursor.execute(selectMediaQuery, [chat_id[0]])
+            media = cursor.fetchall()
+            cursor.execute(selectTextQuery, [chat_id[0]])
+            text = cursor.fetchall()
+
     if not chat_id:
-        await message.answer("Chat does not exist!")
+        await message.answer("Chat does not exist!", reply_markup=moderator_keyboard())
         return
-    if not data:
+    if not text:
+        await message.answer("There are no text messages")
+    else:
+        buffer = ''
+        for t in text:
+            user, time, text = t[0], t[1], t[2]
+            buffer += f'{datetime.datetime.strftime(time, "%d.%m / %H:%M")} - {user}:\n{text}\n\n'
+        with open(code, 'wt', encoding='utf-8') as f:
+            f.write(buffer)
+        del buffer
+        await bot.send_document(message.chat.id, types.InputFile(code, f'{code} text messages.txt'))
+        try: os.remove(code)
+        except Exception as e: print(e)
+
+    if not media:
         await message.answer("There are no media messages")
-        return
-
-    for d in data:
-        filetype, fileid = d[0], d[1]
-        try:
-            if filetype == c.PHOTO:
-                await bot.send_photo(message.chat.id, fileid)
-            elif filetype == c.VIDEO:
-                await bot.send_video(message.chat.id, fileid)
-            elif filetype == c.DOCUMENT:
-                await bot.send_document(message.chat.id, fileid)
-        except Exception as e:
-            await message.answer(str(e))
-        await sleep(.05)
-
+    else:
+        for m in media:
+            filetype, fileid = m[0], m[1]
+            try:
+                if filetype == c.PHOTO:
+                    await bot.send_photo(message.chat.id, fileid)
+                elif filetype == c.VIDEO:
+                    await bot.send_video(message.chat.id, fileid)
+                elif filetype == c.DOCUMENT:
+                    await bot.send_document(message.chat.id, fileid)
+            except Exception as e:
+                await message.answer(str(e))
+            await sleep(.05)
     await message.answer("Sending finished", reply_markup=moderator_keyboard())
 
 
@@ -572,7 +587,7 @@ async def message_handler(message: types.Message, state: FSMContext):
             await tutor_main(message)
         return
     chat_id = data.get('chat_id')
-    
+
     selectQuery = "SELECT client, tutor, code FROM chats WHERE ID=(%s)"
     with DatabaseConnection() as db:
         conn, cursor = db
@@ -919,13 +934,11 @@ async def on_startup(dpc):
 
 
 async def on_shutdown(dpc):
-    # insert code here to run it before shutdown
     pass
 
 
 if __name__ == '__main__':
     dp.loop.create_task(expited_chats_checker.check())
-    dp.loop.create_task(expited_temp_chats_checker.check())
     if WEBHOOK:
         executor.start_webhook(dispatcher=dp, webhook_path=WEBHOOK_PATH,
                                on_startup=on_startup, on_shutdown=on_shutdown, host=WEBAPP_HOST, port=WEBAPP_PORT)
